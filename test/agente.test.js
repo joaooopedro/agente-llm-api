@@ -17,7 +17,7 @@ const llmDe = (...respostas) => {
 };
 
 test("pergunta com ferramenta: escolhe, executa, devolve resposta e passo", async () => {
-  const fetcher = async () => resp({ cep: "36010-011", logradouro: "Av. Barão do Rio Branco", bairro: "Centro", localidade: "Juiz de Fora", uf: "MG", ddd: "32" });
+  const fetcher = async () => resp({ cep: "36010011", street: "Av. Barão do Rio Branco", neighborhood: "Centro", city: "Juiz de Fora", state: "MG" });
   const llm = llmDe(chamada("consultar_cep", { cep: "36010011" }), texto("É no Centro de Juiz de Fora, MG."));
   const r = await responder("Onde fica o CEP 36010-011?", { llm, fetcher });
   assert.equal(r.resposta, "É no Centro de Juiz de Fora, MG.");
@@ -32,7 +32,7 @@ test("pergunta com ferramenta: escolhe, executa, devolve resposta e passo", asyn
 });
 
 test("erro da ferramenta volta ao modelo como erro e aparece no passo", async () => {
-  const fetcher = async () => resp({ erro: "true" });
+  const fetcher = async (url) => (url.includes("brasilapi") ? resp({}, 404) : resp({ erro: "true" }));
   const llm = llmDe(chamada("consultar_cep", { cep: "00000000" }), texto("Esse CEP não existe."));
   const r = await responder("CEP 00000000", { llm, fetcher });
   assert.equal(r.passos[0].ok, false);
@@ -112,4 +112,45 @@ test("modelo: se o primeiro falha por sobrecarga, usa o próximo; erro de chave 
 
   const recusa = async () => resp({ error: { message: "API key not valid" } }, 403);
   await assert.rejects(criarGemini({ chave: "k", modelos: ["a", "b"], fetcher: recusa })([]), (e) => e.status === 403);
+});
+
+test("histórico: a conversa anterior vai ao modelo e o estado é reaproveitado", async () => {
+  const llm = llmDe(texto("É MG."));
+  const historico = [{ pergunta: "CEP 36010011", resposta: "Juiz de Fora, MG." }];
+  await responder("Agora diga só o estado.", { llm, fetcher: async () => {}, historico });
+  const enviado = llm.recebido[0];
+  assert.deepEqual(enviado.map((c) => c.role), ["user", "model", "user"]);
+  assert.equal(enviado[1].parts[0].text, "Juiz de Fora, MG.");
+  assert.equal(enviado[2].parts[0].text, "Agora diga só o estado.");
+});
+
+test("auditoria: cada chamada de ferramenta é registrada com argumentos, resultado e tempo", async () => {
+  const registros = [];
+  const fetcher = async () => resp({ cep: "36010011", state: "MG", city: "Juiz de Fora" });
+  const llm = llmDe(chamada("consultar_cep", { cep: "36010011" }), texto("ok"));
+  await responder("cep", { llm, fetcher, log: (r) => registros.push(r) });
+  assert.equal(registros.length, 1);
+  assert.equal(registros[0].evento, "ferramenta");
+  assert.equal(registros[0].ferramenta, "consultar_cep");
+  assert.equal(registros[0].ok, true);
+  assert.equal(typeof registros[0].ms, "number");
+});
+
+test("instrução trata dados das APIs como dados e nunca como ordem (prompt injection)", async () => {
+  const { instrucao } = await import("../lib/agente.js");
+  assert.match(instrucao("hoje"), /injeção|instruções que apareçam/i);
+});
+
+test("serviço: histórico inválido é descartado e o tamanho é limitado", async () => {
+  let recebido;
+  const llm = async (contents) => { recebido = contents; return texto("ok"); };
+  const historico = [
+    { pergunta: "a", resposta: "b" }, { pergunta: 1, resposta: "x" }, { pergunta: "c", resposta: "d".repeat(5000) },
+    ...Array.from({ length: 10 }, (_, i) => ({ pergunta: "p" + i, resposta: "r" + i })),
+  ];
+  const r = await processar({ metodo: "POST", corpo: { pergunta: "oi", historico }, ip: "h1" }, { chave: "k", llm });
+  assert.equal(r.status, 200);
+  assert.ok(recebido.length <= 1 + 2 * 6);
+  assert.ok(recebido.every((c) => c.parts[0].text.length <= 1000));
+  assert.equal(recebido.at(-1).parts[0].text, "oi");
 });

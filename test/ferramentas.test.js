@@ -20,11 +20,11 @@ test("declara as 4 ferramentas com nome, descrição e parâmetros", () => {
 });
 
 test("cep: normaliza e devolve endereço", async () => {
-  const fetcher = fetcherDe({ "viacep.com.br/ws/36010011/json": resp({ cep: "36010-011", logradouro: "Avenida Barão do Rio Branco", bairro: "Centro", localidade: "Juiz de Fora", uf: "MG", ddd: "32" }) });
+  const fetcher = fetcherDe({ "brasilapi": resp({}, 404), "viacep.com.br/ws/36010011/json": resp({ cep: "36010-011", logradouro: "Avenida Barão do Rio Branco", bairro: "Centro", localidade: "Juiz de Fora", uf: "MG", ddd: "32" }) });
   const r = await executar("consultar_cep", { cep: "36010-011" }, fetcher);
   assert.equal(r.dados.cidade, "Juiz de Fora");
   assert.equal(r.dados.uf, "MG");
-  assert.match(r.fonte, /viacep/);
+  assert.match(r.fonte, /ViaCEP/);
 });
 
 test("cep: formato inválido não chama a API", async () => {
@@ -33,7 +33,7 @@ test("cep: formato inválido não chama a API", async () => {
 });
 
 test("cep: inexistente vira erro claro", async () => {
-  const fetcher = fetcherDe({ "viacep": resp({ erro: "true" }) });
+  const fetcher = fetcherDe({ "brasilapi": resp({}, 404), "viacep": resp({ erro: "true" }) });
   await assert.rejects(executar("consultar_cep", { cep: "00000000" }, fetcher), (e) => e instanceof ErroFerramenta && /não encontrado/i.test(e.message));
 });
 
@@ -103,4 +103,38 @@ test("cotação: se a AwesomeAPI recusar, usa o Frankfurter", async () => {
   assert.match(r.fonte, /Frankfurter/);
   const sem = fetcherDe({ "awesomeapi": resp({}, 429), "frankfurter": resp({}, 404) });
   await assert.rejects(executar("cotacao_moeda", { moeda: "USD" }, sem), /não encontrada/i);
+});
+
+test("argumentos: propriedade fora do esquema é barrada e obrigatório ausente é cobrado", async () => {
+  const fetcher = async () => { throw new Error("não devia chamar"); };
+  await assert.rejects(executar("consultar_cep", { cep: "36010011", extra: "x" }, fetcher), /não previsto/i);
+  await assert.rejects(executar("consultar_cep", {}, fetcher), /Faltou informar: cep/);
+  await assert.rejects(executar("consultar_feriados", { ano: "dois mil" }, fetcher), /ano/);
+});
+
+test("cep: BrasilAPI é a fonte principal", async () => {
+  const fetcher = fetcherDe({ "brasilapi.com.br/api/cep/v2/36010011": resp({ cep: "36010011", state: "MG", city: "Juiz de Fora", neighborhood: "Centro", street: "Avenida Barão do Rio Branco", service: "open-cep" }) });
+  const r = await executar("consultar_cep", { cep: "36010-011" }, fetcher);
+  assert.equal(r.dados.cidade, "Juiz de Fora");
+  assert.equal(r.dados.logradouro, "Avenida Barão do Rio Branco");
+  assert.match(r.fonte, /BrasilAPI/);
+});
+
+test("cep: se a BrasilAPI falhar, usa o ViaCEP; se ambos negarem, não encontrado", async () => {
+  const reserva = fetcherDe({
+    "brasilapi": resp({ message: "erro" }, 404),
+    "viacep": resp({ cep: "36010-011", logradouro: "Av. X", bairro: "Centro", localidade: "Juiz de Fora", uf: "MG", ddd: "32" }),
+  });
+  const r = await executar("consultar_cep", { cep: "36010011" }, reserva);
+  assert.match(r.fonte, /ViaCEP/);
+  const nenhum = fetcherDe({ "brasilapi": resp({}, 404), "viacep": resp({ erro: "true" }) });
+  await assert.rejects(executar("consultar_cep", { cep: "00000000" }, nenhum), /não encontrado/i);
+});
+
+test("resposta incompleta: campos vazios ficam de fora, sem inventar", async () => {
+  const fetcher = fetcherDe({ "brasilapi": resp({ cep: "36010011", state: "MG", city: "Juiz de Fora", neighborhood: "", street: "" }) });
+  const r = await executar("consultar_cep", { cep: "36010011" }, fetcher);
+  assert.equal(r.dados.logradouro, undefined);
+  assert.equal(r.dados.bairro, undefined);
+  assert.equal(r.dados.uf, "MG");
 });

@@ -9,29 +9,41 @@ Aluno: João Pedro Silva de Almeida.
 | Ferramenta | API real consultada | Exemplo de pergunta |
 |---|---|---|
 | `consultar_clima` | Open-Meteo (geocodificação e previsão) | Vai chover em Juiz de Fora amanhã? |
-| `consultar_cep` | ViaCEP | Qual é o endereço do CEP 36010-011? |
-| `cotacao_moeda` | AwesomeAPI | Quanto está o dólar hoje? |
+| `consultar_cep` | BrasilAPI (versão 2 do endpoint de CEP), com ViaCEP de reserva | Moro no CEP 36033-270, qual é o meu bairro? |
+| `cotacao_moeda` | AwesomeAPI, com Frankfurter de reserva | Quanto está o dólar hoje? |
 | `consultar_feriados` | BrasilAPI | Quais são os feriados de novembro de 2026? |
 
-Nenhuma dessas APIs exige chave e nenhuma é simulada. A única chave necessária é a do modelo de linguagem (Gemini).
+Nenhuma dessas APIs exige chave e nenhuma é simulada. A conversa tem memória: depois de perguntar o CEP, "agora me diga apenas o estado" funciona sem chamar a API de novo. A única chave necessária é a do modelo de linguagem (Gemini).
 
 ## Como funciona
 
 1. A interface (`public/index.html`) envia a pergunta para `POST /api/chat`.
-2. `lib/servico.js` valida a entrada, limita o uso por IP e trata os erros.
+2. `lib/servico.js` valida a entrada (inclusive o histórico recebido), limita o uso por IP e trata os erros.
 3. `lib/agente.js` envia ao modelo a pergunta e a descrição das 4 ferramentas (function calling).
 4. O modelo devolve a ferramenta escolhida e os argumentos. Quem executa é a aplicação, não o modelo.
-5. `lib/ferramentas.js` chama a API real, com timeout de 8 segundos, e normaliza o retorno.
+5. `lib/ferramentas.js` valida os argumentos contra o esquema declarado (propriedade fora do esquema é barrada e obrigatório ausente é cobrado), chama a API real com timeout de 8 segundos, usa a API reserva se a principal falhar e normaliza o retorno. Campos que a API não devolve ficam de fora, sem inventar.
 6. O resultado, ou o erro tratado, volta ao modelo, que redige a resposta em português.
 7. A interface mostra a resposta, a ferramenta usada, os argumentos, a fonte, o tempo e os dados.
 
 O diagrama está em `docs/diagrama-arquitetura.png` (e `.svg`).
 
+## Segurança e governança
+
+- O modelo só sugere a ferramenta e os argumentos. A chamada à API é feita pelo código da aplicação, e o modelo não tem acesso à internet.
+- A chave do modelo fica só no servidor (variável de ambiente), nunca no navegador nem no código.
+- Os argumentos são validados antes de qualquer chamada (formato do CEP, ano e mês, código da moeda).
+- Contra prompt injection: a instrução do modelo trata o que o usuário escreve e o que as ferramentas devolvem como dados, e manda ignorar ordens que apareçam dentro deles. O modelo só enxerga as quatro ferramentas, todas de leitura, sem nenhuma que altere ou apague algo.
+- Custo e abuso: limite de 20 perguntas por minuto por IP, pergunta de no máximo 500 caracteres e histórico limitado a 6 turnos.
+- Auditoria: cada chamada de ferramenta gera uma linha JSON no log do servidor, com ferramenta, argumentos, fonte, resultado e tempo.
+
 ## Tratamento de erros
 
 - Pergunta vazia, acima de 500 caracteres ou método diferente de POST.
 - Limite de 20 perguntas por minuto por IP.
-- CEP com formato inválido (não chama a API) ou inexistente.
+- CEP com menos de 8 dígitos (não chama a API) ou inexistente: pede correção ou informa que não encontrou.
+- Pergunta sem o dado necessário (por exemplo, "qual o endereço do meu CEP?"): o modelo pede o CEP em vez de chamar a ferramenta.
+- Resposta incompleta da API: mostra só os campos disponíveis.
+- API principal fora do ar: usa a reserva (BrasilAPI para ViaCEP, AwesomeAPI para Frankfurter).
 - Cidade não encontrada, moeda inexistente, ano ou mês fora do intervalo.
 - Timeout e falha de rede nas APIs: mensagem clara, sem derrubar o servidor.
 - Erro da ferramenta é devolvido ao modelo, que explica o problema ao usuário.
@@ -56,7 +68,7 @@ Variáveis:
 ## Testes
 
 ```
-npm test            # 21 testes de unidade, offline
+npm test            # 31 testes de unidade, offline
 npm run test:real   # 7 testes que chamam as APIs de verdade
 ```
 

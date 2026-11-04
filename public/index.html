@@ -89,14 +89,16 @@
     .enviar { min-width: 48px; min-height: 48px; padding: 0 1.25rem; border: 0; border-radius: var(--raio); background: var(--acento); color: var(--branco); font-weight: 700; cursor: pointer; transition: transform 120ms var(--saida); }
     .enviar:active { transform: scale(0.97); }
     .enviar:disabled { opacity: 0.55; cursor: not-allowed; }
-    .contador { margin: 0.35rem 0 0; font-size: 0.8125rem; color: var(--tinta-fraca); text-align: right; min-height: 1.2em; }
+    .rodape-form { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-top: 0.25rem; }
+    .limpar { min-height: 36px; padding: 0 0.25rem; border: 0; background: none; color: var(--tinta-fraca); font-size: 0.875rem; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+    .contador { margin: 0; font-size: 0.8125rem; color: var(--tinta-fraca); text-align: right; min-height: 1.2em; }
     .contador.alerta { color: var(--erro); }
   </style>
 </head>
 <body>
   <header class="coluna">
     <h1>Pergunte em português. Eu consulto a fonte certa.</h1>
-    <p>Um modelo de linguagem entende a pergunta, escolhe uma ferramenta e consulta uma API pública de verdade. Cada resposta mostra de onde veio o dado.</p>
+    <p>Um modelo de linguagem entende a pergunta, escolhe uma ferramenta e consulta uma API pública de verdade. Cada resposta mostra de onde veio o dado, e a conversa continua de onde parou.</p>
     <div class="exemplos" role="group" aria-label="Exemplos de pergunta">
       <button type="button" class="exemplo">Vai chover em Juiz de Fora amanhã?</button>
       <button type="button" class="exemplo">Qual é o endereço do CEP 36010-011?</button>
@@ -118,12 +120,13 @@
         <textarea id="entrada" rows="1" maxlength="500" placeholder="Ex.: qual a temperatura em Lisboa agora?" autocomplete="off"></textarea>
         <button class="enviar" id="enviar" type="submit">Enviar</button>
       </form>
-      <p class="contador" id="contador" aria-live="polite"></p>
+      <div class="rodape-form"><button type="button" class="limpar" id="limpar">Nova conversa</button><p class="contador" id="contador" aria-live="polite"></p></div>
     </div>
   </footer>
 
   <script>
     const $ = (id) => document.getElementById(id);
+    const historico = [];
     const conversa = $("conversa"), entrada = $("entrada"), enviar = $("enviar"), contador = $("contador");
 
     const el = (tag, props = {}, ...filhos) => {
@@ -196,9 +199,10 @@
       espera.scrollIntoView({ block: "end", behavior: "smooth" });
       enviar.disabled = true;
       try {
-        const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pergunta: texto }) });
+        const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pergunta: texto, historico: historico.slice(-6) }) });
         const corpo = await r.json().catch(() => ({ erro: "A resposta do servidor veio ilegível." }));
         espera.replaceWith(mostrarResposta(corpo, !r.ok));
+        if (r.ok) historico.push({ pergunta: texto, resposta: corpo.resposta });
       } catch {
         espera.replaceWith(mostrarResposta({ erro: "Não consegui falar com o servidor. Verifique a conexão." }, true));
       } finally {
@@ -223,6 +227,10 @@
       entrada.value = "";
       ajustar();
       perguntar(texto);
+    });
+    $("limpar").addEventListener("click", () => {
+      historico.length = 0;
+      conversa.replaceChildren(el("p", { class: "vazio", id: "vazio" }, "Conversa limpa. Escolha um exemplo ou escreva sua pergunta."));
     });
     document.querySelectorAll(".exemplo").forEach((b) => b.addEventListener("click", () => perguntar(b.textContent)));
   </script>
