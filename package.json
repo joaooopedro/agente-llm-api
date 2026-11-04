@@ -1,0 +1,12 @@
+{
+  "name": "agente-consultas",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env dev.js",
+    "test": "node --test test/",
+    "test:real": "REAL=1 node --test test/real.test.js"
+  }
+}

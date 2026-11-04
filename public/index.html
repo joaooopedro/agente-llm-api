@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Consultas por linguagem natural</title>
+  <meta name="description" content="Pergunte em português sobre clima, CEP, cotação e feriados. Um modelo escolhe a ferramenta e consulta APIs reais.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    :root {
+      color-scheme: light;
+      --fundo: oklch(0.985 0.004 188);
+      --superficie: oklch(0.96 0.008 188);
+      --linha: oklch(0.89 0.012 188);
+      --tinta: oklch(0.24 0.025 200);
+      --tinta-fraca: oklch(0.45 0.025 200);
+      --acento: oklch(0.5 0.09 188);
+      --branco: oklch(1 0 0);
+      --acento-fundo: oklch(0.94 0.035 188);
+      --erro: oklch(0.5 0.15 28);
+      --erro-fundo: oklch(0.96 0.03 28);
+      --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      --raio: 10px;
+      --saida: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0; min-height: 100dvh; background: var(--fundo); color: var(--tinta);
+      font: 400 1rem/1.55 "Figtree", system-ui, sans-serif;
+      display: grid; grid-template-rows: auto 1fr auto;
+    }
+    .coluna { width: min(100% - 2rem, 46rem); margin-inline: auto; }
+    header { padding: 2rem 0 1rem; }
+    h1 { margin: 0; font-size: clamp(1.6rem, 4vw, 2.25rem); line-height: 1.15; letter-spacing: -0.02em; font-weight: 700; text-wrap: balance; }
+    header p { margin: 0.5rem 0 0; color: var(--tinta-fraca); max-width: 58ch; text-wrap: pretty; }
+    .exemplos { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.25rem; }
+    button { font: inherit; color: inherit; }
+    .exemplo {
+      min-height: 44px; padding: 0 1rem; border: 1px solid var(--linha); border-radius: 999px;
+      background: transparent; cursor: pointer; transition: background 160ms var(--saida), border-color 160ms var(--saida);
+    }
+    .exemplo:hover { background: var(--acento-fundo); border-color: var(--acento); }
+    :focus-visible { outline: 3px solid var(--acento); outline-offset: 2px; }
+
+    #conversa { padding: 1rem 0 7rem; display: flex; flex-direction: column; gap: 1.75rem; }
+    .pergunta, .resposta, .carregando { scroll-margin-bottom: 7.5rem; }
+    .pergunta { align-self: flex-end; max-width: min(85%, 34rem); background: var(--tinta); color: var(--fundo); padding: 0.65rem 1rem; border-radius: var(--raio) var(--raio) 2px var(--raio); overflow-wrap: anywhere; }
+    .resposta { display: flex; flex-direction: column; gap: 0.9rem; }
+    .resposta .texto { margin: 0; white-space: pre-line; overflow-wrap: anywhere; max-width: 65ch; font-size: 1.0625rem; }
+    .resposta.falha .texto { color: var(--erro); font-weight: 500; }
+    .vazio { color: var(--tinta-fraca); margin: 0; }
+
+    .consulta { border-top: 1px solid var(--linha); padding-top: 0.9rem; display: grid; gap: 0.75rem; }
+    .cabecalho-consulta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.75rem; }
+    .ferramenta { font-weight: 700; }
+    .meta { color: var(--tinta-fraca); font-size: 0.875rem; }
+    .meta.arg { font-family: var(--mono); font-size: 0.8125rem; }
+    .meta a { color: inherit; text-underline-offset: 2px; }
+    .erro-consulta { background: var(--erro-fundo); color: var(--erro); padding: 0.6rem 0.8rem; border-radius: var(--raio); font-size: 0.9375rem; }
+    dl.dados { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1.25rem; font-variant-numeric: tabular-nums; }
+    dl.dados dt { color: var(--tinta-fraca); }
+    dl.dados dd { margin: 0; font: 500 0.9375rem/1.55 var(--mono); overflow-wrap: anywhere; }
+    .tabela { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 0.9375rem; }
+    td { font-family: var(--mono); font-size: 0.875rem; }
+    th, td { text-align: left; padding: 0.4rem 1rem 0.4rem 0; border-bottom: 1px solid var(--linha); white-space: nowrap; }
+    th { color: var(--tinta-fraca); font-weight: 500; }
+    details summary { cursor: pointer; color: var(--tinta-fraca); font-size: 0.875rem; width: fit-content; min-height: 32px; display: flex; align-items: center; }
+    details pre { margin: 0.5rem 0 0; padding: 0.75rem; background: var(--superficie); border-radius: var(--raio); overflow-x: auto; font: 0.8125rem/1.5 var(--mono); }
+
+    .carregando { color: var(--tinta-fraca); display: flex; align-items: center; gap: 0.6rem; }
+    .ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--acento); animation: pulsa 1.1s ease-in-out infinite; }
+    @keyframes pulsa { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+    .entra { animation: entra 320ms var(--saida) both; }
+    @keyframes entra { from { opacity: 0; transform: translateY(8px); } }
+    @media (prefers-reduced-motion: reduce) { .ponto, .entra { animation: none; } .exemplo { transition: none; } }
+
+    footer { position: sticky; bottom: 0; background: var(--fundo); border-top: 1px solid var(--linha); padding: 0.75rem 0 1rem; }
+    form { display: flex; gap: 0.5rem; }
+    textarea {
+      flex: 1; resize: none; min-height: 48px; max-height: 9rem; padding: 0.75rem 1rem; border: 1px solid var(--linha); border-radius: var(--raio);
+      background: var(--branco); color: var(--tinta); font: inherit; line-height: 1.4;
+    }
+    textarea::placeholder { color: var(--tinta-fraca); }
+    textarea:focus-visible { border-color: var(--acento); outline-offset: 0; }
+    .enviar { min-width: 48px; min-height: 48px; padding: 0 1.25rem; border: 0; border-radius: var(--raio); background: var(--acento); color: var(--branco); font-weight: 700; cursor: pointer; transition: transform 120ms var(--saida); }
+    .enviar:active { transform: scale(0.97); }
+    .enviar:disabled { opacity: 0.55; cursor: not-allowed; }
+    .contador { margin: 0.35rem 0 0; font-size: 0.8125rem; color: var(--tinta-fraca); text-align: right; min-height: 1.2em; }
+    .contador.alerta { color: var(--erro); }
+  </style>
+</head>
+<body>
+  <header class="coluna">
+    <h1>Pergunte em português. Eu consulto a fonte certa.</h1>
+    <p>Um modelo de linguagem entende a pergunta, escolhe uma ferramenta e consulta uma API pública de verdade. Cada resposta mostra de onde veio o dado.</p>
+    <div class="exemplos" role="group" aria-label="Exemplos de pergunta">
+      <button type="button" class="exemplo">Vai chover em Juiz de Fora amanhã?</button>
+      <button type="button" class="exemplo">Qual é o endereço do CEP 36010-011?</button>
+      <button type="button" class="exemplo">Quanto está o dólar hoje?</button>
+      <button type="button" class="exemplo">Quais são os feriados de novembro de 2026?</button>
+    </div>
+  </header>
+
+  <main class="coluna">
+    <div id="conversa" role="log" aria-live="polite" aria-label="Conversa">
+      <p class="vazio" id="vazio">Escolha um exemplo acima ou escreva sua pergunta.</p>
+    </div>
+  </main>
+
+  <footer>
+    <div class="coluna">
+      <form id="form">
+        <label for="entrada" hidden>Sua pergunta</label>
+        <textarea id="entrada" rows="1" maxlength="500" placeholder="Ex.: qual a temperatura em Lisboa agora?" autocomplete="off"></textarea>
+        <button class="enviar" id="enviar" type="submit">Enviar</button>
+      </form>
+      <p class="contador" id="contador" aria-live="polite"></p>
+    </div>
+  </footer>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const conversa = $("conversa"), entrada = $("entrada"), enviar = $("enviar"), contador = $("contador");
+
+    const el = (tag, props = {}, ...filhos) => {
+      const n = document.createElement(tag);
+      for (const [k, v] of Object.entries(props)) k === "class" ? (n.className = v) : n.setAttribute(k, v);
+      n.append(...filhos.flat().filter((f) => f != null && f !== false));
+      return n;
+    };
+
+    const ROTULOS = {
+      consultar_clima: "Clima e previsão",
+      consultar_cep: "Consulta de CEP",
+      cotacao_moeda: "Cotação de moeda",
+      consultar_feriados: "Feriados nacionais",
+    };
+    const reais = (v) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 4 });
+    const num = (v, un = "") => `${Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}${un}`;
+    const dataBr = (iso) => iso.split("-").reverse().join("/");
+    const dataHora = (s) => { const [d, h = ""] = s.split(" "); return `${dataBr(d)} ${h.slice(0, 5)}`.trim(); };
+    const linhas = (pares) => el("dl", { class: "dados" }, pares.filter((par) => par && par[1]).flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, String(v))]));
+    const tabela = (cabecalho, corpo) =>
+      el("div", { class: "tabela" }, el("table", {},
+        el("thead", {}, el("tr", {}, cabecalho.map((c) => el("th", { scope: "col" }, c)))),
+        el("tbody", {}, corpo.map((l) => el("tr", {}, l.map((c) => el("td", {}, String(c))))))));
+
+    const desenhar = {
+      consultar_clima: (d) => el("div", {}, linhas([
+        ["Local", d.local], ["Agora", `${num(d.agora.temperatura_c, " °C")}, ${d.agora.condicao.toLowerCase()}`],
+        ["Sensação", num(d.agora.sensacao_c, " °C")], ["Umidade", num(d.agora.umidade_pct, "%")], ["Vento", num(d.agora.vento_kmh, " km/h")],
+      ]), tabela(["Dia", "Mín.", "Máx.", "Chuva"], d.previsao.map((p) => [dataBr(p.data), num(p.min_c, " °C"), num(p.max_c, " °C"), `${p.chuva_pct}%`]))),
+      consultar_cep: (d) => linhas([["CEP", d.cep], ["Rua", d.logradouro], ["Complemento", d.complemento], ["Bairro", d.bairro], ["Cidade", `${d.cidade}, ${d.uf}`], ["DDD", d.ddd]]),
+      cotacao_moeda: (d) => linhas([
+        ["Moeda", `${d.moeda}, ${d.nome}`], ["Compra", reais(d.compra)], ["Venda", reais(d.venda)],
+        d.variacao_pct != null && ["Variação no dia", num(d.variacao_pct, "%")], d.maxima != null && ["Máxima / mínima", `${reais(d.maxima)} / ${reais(d.minima)}`], ["Atualizado em", dataHora(d.atualizado_em)],
+      ]),
+      consultar_feriados: (d) => d.feriados.length
+        ? tabela(["Data", "Feriado"], d.feriados.map((f) => [dataBr(f.data), f.nome]))
+        : el("p", { class: "meta" }, "Nenhum feriado nacional nesse período."),
+    };
+
+    const hostDe = (fonte) => fonte?.match(/\(([^)]+)\)/)?.[1];
+
+    function consulta(p) {
+      const args = Object.entries(p.argumentos).map(([k, v]) => `${k}: ${v}`).join(", ");
+      const fonte = hostDe(p.fonte);
+      return el("section", { class: "consulta", "aria-label": `Consulta: ${ROTULOS[p.ferramenta] ?? p.ferramenta}` },
+        el("div", { class: "cabecalho-consulta" },
+          el("span", { class: "ferramenta" }, ROTULOS[p.ferramenta] ?? p.ferramenta),
+          el("span", { class: "meta arg" }, args),
+          fonte && el("span", { class: "meta" }, "Fonte: ", el("a", { href: `https://${fonte}`, target: "_blank", rel: "noopener" }, fonte)),
+          el("span", { class: "meta" }, `${p.ms} ms`)),
+        p.ok ? (desenhar[p.ferramenta]?.(p.dados) ?? null) : el("div", { class: "erro-consulta", role: "alert" }, p.erro),
+        p.ok && el("details", {}, el("summary", {}, "Ver dados brutos"), el("pre", {}, JSON.stringify(p.dados, null, 2))));
+    }
+
+    function mostrarResposta(corpo, falha) {
+      const bloco = el("article", { class: `resposta entra${falha ? " falha" : ""}` }, el("p", { class: "texto" }, falha ? corpo.erro : corpo.resposta));
+      if (!falha) {
+        if (corpo.passos.length === 0) bloco.append(el("p", { class: "meta" }, "Nenhuma ferramenta foi usada: a pergunta está fora do que eu consulto."));
+        else corpo.passos.forEach((p) => bloco.append(consulta(p)));
+      }
+      return bloco;
+    }
+
+    async function perguntar(texto) {
+      $("vazio")?.remove();
+      conversa.append(el("p", { class: "pergunta entra" }, texto));
+      const espera = el("div", { class: "carregando" }, el("span", { class: "ponto" }), "Entendendo a pergunta e consultando a fonte...");
+      conversa.append(espera);
+      espera.scrollIntoView({ block: "end", behavior: "smooth" });
+      enviar.disabled = true;
+      try {
+        const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pergunta: texto }) });
+        const corpo = await r.json().catch(() => ({ erro: "A resposta do servidor veio ilegível." }));
+        espera.replaceWith(mostrarResposta(corpo, !r.ok));
+      } catch {
+        espera.replaceWith(mostrarResposta({ erro: "Não consegui falar com o servidor. Verifique a conexão." }, true));
+      } finally {
+        enviar.disabled = false;
+        conversa.lastElementChild.scrollIntoView({ block: "end", behavior: "smooth" });
+      }
+    }
+
+    const ajustar = () => {
+      entrada.style.height = "auto";
+      entrada.style.height = `${Math.min(entrada.scrollHeight, 144)}px`;
+      const resta = 500 - entrada.value.length;
+      contador.textContent = resta <= 100 ? `${resta} caracteres restantes` : "";
+      contador.classList.toggle("alerta", resta <= 20);
+    };
+    entrada.addEventListener("input", ajustar);
+    entrada.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("form").requestSubmit(); } });
+    $("form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const texto = entrada.value.trim();
+      if (!texto || enviar.disabled) return;
+      entrada.value = "";
+      ajustar();
+      perguntar(texto);
+    });
+    document.querySelectorAll(".exemplo").forEach((b) => b.addEventListener("click", () => perguntar(b.textContent)));
+  </script>
+</body>
+</html>
